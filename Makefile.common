@@ -1,0 +1,85 @@
+# -*- Makefile -*-
+#CC    = clang -c
+#CXX   = clang++ -c
+#LD    = clang -fuse-ld=lld
+
+CC  = gcc -c
+CXX = g++ -c
+LD  = gcc
+
+STRIP = strip -s
+
+OBJCOPY = objcopy
+
+BIN_DIR  = ./bin
+OBJS_DIR = ./obj
+
+CFLAGS_RELEASE   = -g3 -Wall -O2 $(CFLAGS_APPEND)
+CXXFLAGS_RELEASE = -g3 -Wall -O2 $(CXXFLAGS_APPEND)
+
+CFLAGS_DEBUG   = -g3 -Wall -O0 $(CFLAGS_APPEND)
+CXXFLAGS_DEBUG = -g3 -Wall -O0 $(CXXFLAGS_APPEND)
+
+LDFLAGS += -lpthread -lrt -lstdc++ $(LDFLAGS_OPT)
+
+RELEASE_OBJS_C   = $(addprefix $(OBJS_DIR)/,${C_OBJS:.o=.rco})
+RELEASE_OBJS_CXX = $(addprefix $(OBJS_DIR)/,${CXX_OBJS:.o=.rcppo})
+
+DEBUG_OBJS_C   = $(addprefix $(OBJS_DIR)/,${C_OBJS:.o=.dco})
+DEBUG_OBJS_CXX = $(addprefix $(OBJS_DIR)/,${CXX_OBJS:.o=.dcppo})
+
+VERT_OBJS_IN_OBJS = $(addprefix $(OBJS_DIR)/,${VERT_OBJS:.vert=.vo})
+FRAG_OBJS_IN_OBJS = $(addprefix $(OBJS_DIR)/,${FRAG_OBJS:.frag=.fo})
+
+RELEASE_OBJS = $(RELEASE_OBJS_C) $(RELEASE_OBJS_CXX) $(VERT_OBJS_IN_OBJS) $(FRAG_OBJS_IN_OBJS)
+DEBUG_OBJS = $(DEBUG_OBJS_C) $(DEBUG_OBJS_CXX)  $(VERT_OBJS_IN_OBJS) $(FRAG_OBJS_IN_OBJS)
+
+RELEASE_OUT = $(BIN_DIR)/$(RELEASE_TARGET)
+DEBUG_OUT = $(BIN_DIR)/$(DEBUG_TARGET)
+
+all: release
+
+release : $(RELEASE_OUT)
+
+debug : $(DEBUG_OUT)
+
+$(OBJS_DIR)/%.rco: %.c
+	@if [ ! -d $(OBJS_DIR) ]; then \
+		mkdir $(OBJS_DIR); \
+	fi;
+	$(CC) $(INCDIRS) $(CFLAGS_RELEASE) $< -o $@
+
+$(OBJS_DIR)/%.rcppo: %.cpp
+	@if [ ! -d $(OBJS_DIR) ]; then \
+		mkdir $(OBJS_DIR); \
+	fi;
+	$(CXX) $(INCDIRS) $(CXXFLAGS_RELEASE) $< -o $@
+
+$(OBJS_DIR)/%.dcppo: %.cpp
+	@if [ ! -d $(OBJS_DIR) ]; then \
+		mkdir $(OBJS_DIR); \
+	fi;
+	$(CXX) $(INCDIRS) $(CXXFLAGS_DEBUG) $< -o $@
+
+$(OBJS_DIR)/%.dco: %.c
+	@if [ ! -d $(OBJS_DIR) ]; then \
+		mkdir $(OBJS_DIR); \
+	fi;
+	$(CC) $(INCDIRS) $(CFLAGS_DEBUG) $< -o $@
+
+$(OBJS_DIR)/%.vo: %.vert
+	@if [ ! -d $(OBJS_DIR) ]; then \
+		mkdir $(OBJS_DIR); \
+	fi;
+	$(OBJCOPY) --readonly-text -I binary -B i386 -O elf64-x86-64 $< $@
+
+$(RELEASE_OUT) : $(RELEASE_OBJS)
+	@if [ ! -d $(BIN_DIR) ]; then \
+		mkdir $(BIN_DIR); \
+	fi;
+	$(LD) $^ $(LDFLAGS) $(LIBS) -o $@
+	cp $@ $@-symbol
+	$(STRIP) $@
+
+clean:
+	rm -rf $(TARGET) $(RELEASE_OBJS_CXX) *.rco *.dco *.rcppo *.dcppo *.vo *.fo *~ $(BIN_DIR) $(OBJS_DIR)
