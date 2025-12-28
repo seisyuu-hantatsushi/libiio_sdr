@@ -1,0 +1,11 @@
+{
+    "phy" : "ad9361-phy",
+    "lo" : 77800000,
+    "SampleRate" : 1200000,
+    "rx" : {
+	"devname" : "cf-ad9361-lpc",
+	"ch": 0,
+	"SampleSizeForBuffer" : 32768,
+	"bandwidth" : 2000000
+    }
+}
