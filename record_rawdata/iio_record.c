@@ -106,18 +106,13 @@ static void* mainThread(void *pParams){
             goto error_exit;
         }
 
+        // set FIR Filter
         ret = ad9361_set_bb_rate(pPhyDev, pCtx->parameters.samplingRate);
         if(ret < 0){
             fprintf(stderr,"FIR filiter could not be constructed. %d\n", ret);
             goto error_exit;
         }
 
-#if 0
-        ret = iio_channel_attr_write_longlong(pRx0_Phy, "filter_fir_en", 1);
-        if(ret < 0){
-            fprintf(stderr,"filter_fir_en could not be set. %d\n", ret);
-        }
-#endif
         iio_channel_attr_write(pRx0_Phy, "rf_port_select", "A_BALANCED");
         iio_channel_attr_write_longlong(pRx0_Phy, "rf_bandwidth", pCtx->parameters.rx.bandwidth);
         //ret = iio_channel_attr_write_longlong(pRx0_Phy, "sampling_frequency", pCtx->parameters.samplingRate);
@@ -156,14 +151,23 @@ static void* mainThread(void *pParams){
         goto error_exit;
     }
 
+#if 0
     iio_utils_read_device_attributes(pPhyDev);
     iio_utils_read_channel_attributes(pRx0_Phy);
     iio_utils_read_channel_attributes(pRx0_LO);
-
+    
     iio_utils_read_device_attributes(pRxDev);
     iio_utils_read_channel_attributes(pRx0_I);
     iio_utils_read_channel_attributes(pRx0_Q);
-        
+
+
+    {
+        const struct iio_data_format *pFormat;
+        pFormat = iio_channel_get_data_format(pRx0_I);
+        fprintf(stderr, "bit: %d, is_signed %s\n", pFormat->bits, pFormat->is_signed?"true":"false");
+    }
+#endif
+
     iio_channel_enable(pRx0_I);
     iio_channel_enable(pRx0_Q);
     

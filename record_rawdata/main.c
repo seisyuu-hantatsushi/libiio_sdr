@@ -340,7 +340,7 @@ int main(int argc, char **argv){
         if(read_size > 0 && outfp != NULL){
             const int16_t *pIQData = (const int16_t*)pRecvBuffer;
             for(i=0;i<read_size/sizeof(uint16_t);i++){
-                float f = (float)pIQData[i]/32768.0f;
+                float f = (float)pIQData[i]/2048.0f; //signed 12bit A/D data
                 fwrite(&f, sizeof(f), 1, outfp);
             }
         } else if(read_size < 0){
