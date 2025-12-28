@@ -37,6 +37,8 @@ DEBUG_OBJS = $(DEBUG_OBJS_C) $(DEBUG_OBJS_CXX)  $(VERT_OBJS_IN_OBJS) $(FRAG_OBJS
 RELEASE_OUT = $(BIN_DIR)/$(RELEASE_TARGET)
 DEBUG_OUT = $(BIN_DIR)/$(DEBUG_TARGET)
 
+.PHONY: FORCE compdb
+
 all: release
 
 release : $(RELEASE_OUT)
@@ -80,6 +82,9 @@ $(RELEASE_OUT) : $(RELEASE_OBJS)
 	$(LD) $^ $(LDFLAGS) $(LIBS) -o $@
 	cp $@ $@-symbol
 	$(STRIP) $@
+
+compdb:
+	@bear -- make -j
 
 clean:
 	rm -rf $(TARGET) $(RELEASE_OBJS_CXX) *.rco *.dco *.rcppo *.dcppo *.vo *.fo *~ $(BIN_DIR) $(OBJS_DIR)
