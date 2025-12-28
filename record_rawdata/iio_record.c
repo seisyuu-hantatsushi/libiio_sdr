@@ -12,7 +12,9 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 
+#include <ad9361.h>
 #include <iio.h>
+#include "iio_utils.h"
 #include "iio_record.h"
 #include "utils.h"
 
@@ -45,7 +47,8 @@ static void* mainThread(void *pParams){
     struct epoll_event evs[10];
     uint32_t i;
     struct iio_context *pIIOCtx  = NULL;
-    struct iio_device  *pRxDev   = NULL;
+    struct iio_device  *pPhyDev = NULL, *pRxDev   = NULL;
+    struct iio_channel *pRx0_Phy = NULL, *pRx0_LO = NULL;
     struct iio_channel *pRx0_I = NULL, *pRx0_Q = NULL;
     struct iio_buffer *pRxBuf = NULL;
     
@@ -70,6 +73,13 @@ static void* mainThread(void *pParams){
         goto error_exit;
     }
 
+    // get IIO Phu device
+    pPhyDev = iio_context_find_device(pIIOCtx, &pCtx->parameters.phy_name[0]);
+    if(pPhyDev == NULL){
+        fprintf(stderr, "failed to get iio phy device.\n");
+        goto error_exit;
+    }
+
     // get IIO RX devices
     pRxDev = iio_context_find_device(pIIOCtx, &pCtx->parameters.rx.dev_name[0]);
     if(pRxDev == NULL){
@@ -87,26 +97,44 @@ static void* mainThread(void *pParams){
     
     // configuration RX Devices
     {
-        struct iio_channel *pCh = NULL;
         char chname[64] = { '\0' };
         fprintf(stderr, "* Acquiring AD9361 phy channel %d\n", pCtx->parameters.rx.ch);
         snprintf(chname, sizeof(chname), "voltage%d", pCtx->parameters.rx.ch);
-        pCh = iio_device_find_channel(pRxDev, &chname[0], false);
-        if(pCh == NULL){
+        pRx0_Phy = iio_device_find_channel(pPhyDev, &chname[0], false);
+        if(pRx0_Phy == NULL){
             fprintf(stderr, "not found a channel for rx rf.\n");
             goto error_exit;
         }
-        iio_channel_attr_write(pCh, "rf_port_select", "A_BALANCED");
-        iio_channel_attr_write_longlong(pCh, "rf_bandwidth", pCtx->parameters.rx.bandwidth);
-        iio_channel_attr_write_longlong(pCh, "sampling_frequency", pCtx->parameters.samplingRate);
 
+        ret = ad9361_set_bb_rate(pPhyDev, pCtx->parameters.samplingRate);
+        if(ret < 0){
+            fprintf(stderr,"FIR filiter could not be constructed. %d\n", ret);
+            goto error_exit;
+        }
+
+#if 0
+        ret = iio_channel_attr_write_longlong(pRx0_Phy, "filter_fir_en", 1);
+        if(ret < 0){
+            fprintf(stderr,"filter_fir_en could not be set. %d\n", ret);
+        }
+#endif
+        iio_channel_attr_write(pRx0_Phy, "rf_port_select", "A_BALANCED");
+        iio_channel_attr_write_longlong(pRx0_Phy, "rf_bandwidth", pCtx->parameters.rx.bandwidth);
+        //ret = iio_channel_attr_write_longlong(pRx0_Phy, "sampling_frequency", pCtx->parameters.samplingRate);
+        if(ret < 0){
+            fprintf(stderr,"rf bandwidth could not be set. %ld %d\n", pCtx->parameters.rx.bandwidth, ret);
+        }
+        ret = iio_channel_attr_write_longlong(pRx0_Phy, "sampling_frequency", pCtx->parameters.samplingRate);
+        if(ret < 0){
+            fprintf(stderr,"sampling frequency could not be set. %ld %d\n", pCtx->parameters.samplingRate,  ret);
+        }
         // finds AD9361  IIO configuration of local oscillator for RX channels
-        pCh = iio_device_find_channel(iio_context_find_device(pIIOCtx, &pCtx->parameters.phy_name[0]), "altvoltage0", true);
-        if(pCh == NULL){
+        pRx0_LO = iio_device_find_channel(pPhyDev, "altvoltage0", true);
+        if(pRx0_LO == NULL){
             fprintf(stderr, "not found a channel for rx lo.\n");
             goto error_exit;
         }
-        iio_channel_attr_write_longlong(pCh, "frequency", pCtx->parameters.lo);
+        iio_channel_attr_write_longlong(pRx0_LO, "frequency", pCtx->parameters.lo);
     }                   
     
     // Initializing AD9361 IIO streaming channels
@@ -128,6 +156,14 @@ static void* mainThread(void *pParams){
         goto error_exit;
     }
 
+    iio_utils_read_device_attributes(pPhyDev);
+    iio_utils_read_channel_attributes(pRx0_Phy);
+    iio_utils_read_channel_attributes(pRx0_LO);
+
+    iio_utils_read_device_attributes(pRxDev);
+    iio_utils_read_channel_attributes(pRx0_I);
+    iio_utils_read_channel_attributes(pRx0_Q);
+        
     iio_channel_enable(pRx0_I);
     iio_channel_enable(pRx0_Q);
     

@@ -1,7 +1,10 @@
+#include <bits/time.h>
+#include <bits/types/struct_itimerspec.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <time.h>
 #include <unistd.h>
 #include <limits.h>
 
@@ -12,9 +15,11 @@
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
 #include <sys/eventfd.h>
+#include <sys/timerfd.h>
 
 #include <jansson.h>
 
+#include "utils.h"
 #include "iio_record.h"
 
 #define BULK_OF(x) (sizeof(x)/sizeof(x[0]))
@@ -179,7 +184,7 @@ static int32_t RecorderEvent(uint32_t event, void *pCookie){
 int main(int argc, char **argv){
     int ret;
     sigset_t sigmask;
-    int epollfd = -1, sigfd = -1;
+    int epollfd = -1, sigfd = -1, timerfd = -1;
     struct epoll_event evs[3];
     bool bCnt = true;
     struct AppContext appCtx = { '\0' };
@@ -187,7 +192,8 @@ int main(int argc, char **argv){
     uint32_t recvBufSize = 32*1024*4;
     uint8_t *pRecvBuffer = NULL;
     FILE *outfp = NULL;
-    
+    struct timespec prev,now,start_time;
+    uint64_t prev_total_recvbyte = 0,now_total_recv_byte = 0;
     appCtx.termfd = -1;
 
     pRecvBuffer = (uint8_t *)malloc(recvBufSize);
@@ -247,6 +253,21 @@ int main(int argc, char **argv){
         goto error_exit;
     }
 
+    timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
+    if(timerfd == -1){
+        fprintf(stderr, "failed to add termfd to epoll fd %s(%d)\n", strerror(errno), errno);
+        ret = 1;
+        goto error_exit;
+    }
+    evs[0].events = EPOLLIN;
+    evs[0].data.fd = timerfd;
+    ret = epoll_ctl(epollfd, EPOLL_CTL_ADD, timerfd, &evs[0]);
+    if(ret == -1){
+        fprintf(stderr, "failed to add timerfd to epoll fd %s(%d)\n", strerror(errno), errno);
+        ret = 1;
+        goto error_exit;
+    }
+    
     ret = parse_arguments(&appCtx, argc, argv);
     if(ret < 0){
         ret = 1;
@@ -287,25 +308,47 @@ int main(int argc, char **argv){
         goto error_exit;
     }
 
+    clock_gettime(CLOCK_MONOTONIC, &prev);
+    start_time = now = prev;
+
+    {
+        const struct itimerspec interval = {
+            .it_value = {
+                .tv_sec = 1,
+                .tv_nsec = 0,
+            },
+            .it_interval = {
+                .tv_sec = 1,
+                .tv_nsec = 0,
+            }
+        };
+        timerfd_settime(timerfd, 0, &interval, NULL);
+    }
+    
     while(bCnt){
         size_t i;
         int32_t read_size;
-        
+
         ret = epoll_wait(epollfd, &evs[0], BULK_OF(evs), 0);
         if(ret == -1){
             fprintf(stderr, "failed to wait epoll fd %s(%d)\n", strerror(errno), errno);
             ret = 1;
             goto error_exit;
         }
-
+        clock_gettime(CLOCK_MONOTONIC, &now);
         read_size = IIO_IQ_RecorderReadData(recorder, pRecvBuffer, recvBufSize);
         if(read_size > 0 && outfp != NULL){
-            const uint16_t *pIQData = (const uint16_t*)pRecvBuffer;
+            const int16_t *pIQData = (const int16_t*)pRecvBuffer;
             for(i=0;i<read_size/sizeof(uint16_t);i++){
                 float f = (float)pIQData[i]/32768.0f;
                 fwrite(&f, sizeof(f), 1, outfp);
             }
+        } else if(read_size < 0){
+            fprintf(stderr, "could not receive IQ data\n");
+            ret = 1;
+            goto error_exit;
         }
+        now_total_recv_byte += read_size;
         
         for(i=0;i<(size_t)ret;i++){
             if(evs[i].data.fd == sigfd){
@@ -329,6 +372,21 @@ int main(int argc, char **argv){
                 read_size = read(appCtx.termfd, &val, sizeof(val));
                 (void)read_size;
                 bCnt = 0;
+            } else if(evs[i].data.fd == timerfd){
+                uint64_t val;
+                ssize_t read_size;
+                int64_t deltatime,deltarecv,elapsed_time;
+                char tmp[64] = { '\0' };
+                read_size = read(timerfd, &val, sizeof(val));
+                (void)read_size;
+                elapsed_time = timespec_sub(&now, &start_time);
+                deltatime = timespec_sub(&now, &prev);
+                deltarecv = now_total_recv_byte-prev_total_recvbyte;
+                fprintf(stderr,"%ld.%09ld current recv rate %s\r",
+                        elapsed_time/1000000000, elapsed_time%1000000000,
+                        doubleToPrefixStr(tmp, sizeof(tmp), (double)deltarecv/((double)deltatime/(1000.0*1000.0*1000.0))));
+                prev = now;
+                prev_total_recvbyte = now_total_recv_byte;
             }
         }
     }
@@ -347,6 +405,10 @@ int main(int argc, char **argv){
     
     if(recorder != NULL){
         IIO_IQ_RecorderDestory(recorder);
+    }
+
+    if(timerfd != -1){
+        close(timerfd);
     }
     
     if(appCtx.termfd != -1){

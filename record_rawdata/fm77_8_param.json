@@ -6,6 +6,6 @@
 	"devname" : "cf-ad9361-lpc",
 	"ch": 0,
 	"SampleSizeForBuffer" : 32768,
-	"bandwidth" : 2000000
+	"bandwidth" : 800000
     }
 }
